@@ -1,0 +1,62 @@
+version: '3.8'
+
+services:
+  # MongoDB database for event storage
+  mongodb:
+    image: mongo:7.0
+    container_name: streaming-mongodb
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: admin123
+      MONGO_INITDB_DATABASE: streaming_analytics
+    volumes:
+      - mongodb_data:/data/db
+      - ./mongo-init:/docker-entrypoint-initdb.d
+    networks:
+      - streaming-network
+
+  # Web UI for MongoDB
+  mongo-express:
+    image: mongo-express:latest
+    container_name: streaming-mongo-express
+    ports:
+      - "8081:8081"
+    environment:
+      ME_CONFIG_MONGODB_ADMINUSERNAME: admin
+      ME_CONFIG_MONGODB_ADMINPASSWORD: admin123
+      ME_CONFIG_MONGODB_URL: mongodb://admin:admin123@mongodb:27017/
+      ME_CONFIG_BASICAUTH: false
+    depends_on:
+      - mongodb
+    networks:
+      - streaming-network
+
+  # Tomcat application server
+  tomcat:
+    image: tomcat:10.0-jdk11
+    container_name: streaming-tomcat
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./target/streaming-analytics-1.0-SNAPSHOT.war:/usr/local/tomcat/webapps/streaming-analytics.war
+    environment:
+      - CATALINA_OPTS=-Xms512m -Xmx1024m
+      - MONGODB_HOST=mongodb
+      - MONGODB_PORT=27017
+      - MONGODB_DATABASE=streaming_analytics
+      - MONGODB_USERNAME=admin
+      - MONGODB_PASSWORD=admin123
+    depends_on:
+      - mongodb
+    networks:
+      - streaming-network
+
+volumes:
+  mongodb_data:
+    driver: local
+
+networks:
+  streaming-network:
+    driver: bridge
