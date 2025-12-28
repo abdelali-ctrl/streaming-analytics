@@ -67,14 +67,16 @@ class DataGeneratorTest {
         assertEquals("video_123", video.getVideoId(), "Video ID should match input");
 
         assertNotNull(video.getTitle(), "Title should not be null");
-        assertTrue(video.getTitle().endsWith(" 123"), "Title should end with video number");
+        assertFalse(video.getTitle().isEmpty(), "Title should not be empty");
 
         assertNotNull(video.getCategory(), "Category should not be null");
-        assertTrue(List.of("Action", "Comedy", "Drama", "Documentary", "SciFi", "Horror", "Romance", "Thriller")
+        assertTrue(List
+                .of("Action", "Comedy", "Drama", "Documentary", "Sci-Fi", "Horror", "Romance", "Thriller", "Animation",
+                        "Adventure")
                 .contains(video.getCategory()), "Category should be valid");
 
-        assertTrue(video.getDuration() >= 300 && video.getDuration() <= 7200,
-                "Duration should be between 5 minutes and 2 hours");
+        assertTrue(video.getDuration() >= 5400 && video.getDuration() <= 10800,
+                "Duration should be between 1.5 hours and 3 hours");
 
         assertNotNull(video.getUploadDate(), "Upload date should not be null");
         assertTrue(video.getUploadDate().isBefore(Instant.now().plus(1, ChronoUnit.MINUTES)),

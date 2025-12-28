@@ -20,6 +20,55 @@
                     <header class="header">
                         <h1>📊 Streaming Analytics Dashboard</h1>
                         <p class="subtitle">Real-time Big Data Analytics Platform</p>
+
+                        <!-- Continuous Generation Control -->
+                        <div class="generator-control">
+                            <div class="generator-info">
+                                <span class="generator-label">📡 Continuous Generation</span>
+                                <span id="generator-status" class="generator-status status-inactive">Inactive</span>
+                            </div>
+
+                            <!-- Rate Control Slider -->
+                            <div class="rate-control">
+                                <label for="rate-slider">⚡ Rate:</label>
+                                <input type="range" id="rate-slider" min="1" max="50" value="5" class="rate-slider">
+                                <span id="rate-value" class="rate-value">5 evt/s</span>
+                            </div>
+
+                            <div class="generator-stats">
+                                <span id="events-count">0 events generated</span>
+                            </div>
+
+                            <!-- Live User Count -->
+                            <div class="live-users">
+                                <span class="live-indicator"></span>
+                                <span id="live-user-count">0</span>
+                                <span class="live-label">active users</span>
+                            </div>
+
+                            <button id="generator-toggle" class="generator-toggle" onclick="toggleGenerator()">
+                                <div class="toggle-icon">
+                                    <svg class="wifi-icon" viewBox="0 0 24 24" width="24" height="24">
+                                        <path class="wifi-wave wave-3"
+                                            d="M1 9l2 2c4.97-4.97 13.03-4.97 18 0l2-2C16.93 2.93 7.08 2.93 1 9z" />
+                                        <path class="wifi-wave wave-2"
+                                            d="M5 13l2 2c2.76-2.76 7.24-2.76 10 0l2-2C15.14 9.14 8.87 9.14 5 13z" />
+                                        <path class="wifi-wave wave-1" d="M9 17l3 3 3-3c-1.65-1.66-4.34-1.66-6 0z" />
+                                    </svg>
+                                </div>
+                                <span class="toggle-text">Start</span>
+                            </button>
+
+                            <!-- Export Buttons -->
+                            <div class="export-buttons">
+                                <button class="btn-export" onclick="exportData('json')" title="Export as JSON">
+                                    <span>📄</span> JSON
+                                </button>
+                                <button class="btn-export" onclick="exportData('csv')" title="Export as CSV">
+                                    <span>📊</span> CSV
+                                </button>
+                            </div>
+                        </div>
                     </header>
 
                     <!-- Error Message -->
@@ -549,8 +598,92 @@
                         });
                     }
 
-                    // ========== SSE REAL-TIME EVENTS ==========
-                    function connectEventStream() {
+                    // ========== WEBSOCKET REAL-TIME EVENTS ==========
+                    let websocket = null;
+                    let wsReconnectTimer = null;
+
+                    function connectWebSocket() {
+                        const eventDiv = document.getElementById('event-stream');
+                        let eventCount = 0;
+
+                        // Build WebSocket URL
+                        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                        const wsUrl = protocol + '//' + window.location.host + '${pageContext.request.contextPath}/ws/realtime';
+
+                        try {
+                            websocket = new WebSocket(wsUrl);
+
+                            websocket.onopen = function (e) {
+                                console.log('WebSocket connected');
+                                eventDiv.innerHTML = '<p class="stream-status connected">🔌 WebSocket connected - Real-time mode</p>';
+
+                                // Clear any pending reconnect timer
+                                if (wsReconnectTimer) {
+                                    clearTimeout(wsReconnectTimer);
+                                    wsReconnectTimer = null;
+                                }
+                            };
+
+                            websocket.onmessage = function (e) {
+                                try {
+                                    const message = JSON.parse(e.data);
+
+                                    if (message.type === 'event') {
+                                        const data = message.data;
+                                        eventCount++;
+
+                                        const eventHtml = '<div class="event-item">' +
+                                            '<span class="event-time">' + new Date().toLocaleTimeString() + '</span> ' +
+                                            '<span class="event-id">' + (data.eventId || 'N/A') + '</span> - ' +
+                                            '<span class="event-action">' + (data.action || 'N/A') + '</span> - ' +
+                                            'User: <span class="event-user">' + (data.userId || 'N/A') + '</span> - ' +
+                                            'Video: <span class="event-video">' + (data.videoId || 'N/A') + '</span>' +
+                                            '</div>';
+
+                                        const status = eventDiv.querySelector('.stream-status');
+                                        if (status) status.remove();
+
+                                        const events = eventDiv.querySelectorAll('.event-item');
+                                        if (events.length >= 10) {
+                                            events[events.length - 1].remove();
+                                        }
+                                        eventDiv.insertAdjacentHTML('afterbegin', eventHtml);
+                                    } else if (message.type === 'connected') {
+                                        console.log('WebSocket welcome:', message.message);
+                                    }
+                                } catch (err) {
+                                    console.log('Error parsing WebSocket message:', err);
+                                }
+                            };
+
+                            websocket.onclose = function (e) {
+                                console.log('WebSocket closed:', e.reason);
+                                if (eventCount === 0) {
+                                    eventDiv.innerHTML = '<p class="stream-status">⏸️ WebSocket disconnected - Reconnecting...</p>';
+                                }
+
+                                // Attempt to reconnect after 3 seconds
+                                wsReconnectTimer = setTimeout(function () {
+                                    console.log('Attempting WebSocket reconnection...');
+                                    connectWebSocket();
+                                }, 3000);
+                            };
+
+                            websocket.onerror = function (e) {
+                                console.log('WebSocket error');
+                            };
+
+                        } catch (e) {
+                            console.error('WebSocket connection error:', e);
+                            eventDiv.innerHTML = '<p class="stream-status">⏸️ Could not connect to WebSocket</p>';
+
+                            // Fallback to SSE
+                            connectEventStreamSSE();
+                        }
+                    }
+
+                    // SSE Fallback for browsers or when WebSocket fails
+                    function connectEventStreamSSE() {
                         const eventDiv = document.getElementById('event-stream');
                         let eventCount = 0;
 
@@ -559,7 +692,7 @@
                                 const source = new EventSource('${pageContext.request.contextPath}/api/v1/analytics/realtime/stream');
 
                                 source.addEventListener('connected', function (e) {
-                                    eventDiv.innerHTML = '<p class="stream-status connected">✅ Connected to real-time stream</p>';
+                                    eventDiv.innerHTML = '<p class="stream-status connected">✅ Connected (SSE fallback)</p>';
                                 });
 
                                 source.addEventListener('event', function (e) {
@@ -584,10 +717,6 @@
                                     eventDiv.insertAdjacentHTML('afterbegin', eventHtml);
                                 });
 
-                                source.addEventListener('heartbeat', function (e) {
-                                    console.log('SSE heartbeat received');
-                                });
-
                                 source.onerror = function () {
                                     if (eventCount === 0) {
                                         eventDiv.innerHTML = '<p class="stream-status">⏸️ Stream paused - Refresh to reconnect</p>';
@@ -597,12 +726,204 @@
                             } catch (e) {
                                 eventDiv.innerHTML = '<p class="stream-status">⏸️ Could not connect to stream</p>';
                             }
-                        } else {
-                            eventDiv.innerHTML = '<p class="stream-status">⚠️ Browser does not support SSE</p>';
                         }
                     }
 
-                    connectEventStream();
+                    // Connect using WebSocket (primary) with SSE fallback
+                    connectWebSocket();
+
+                    // ========== CONTINUOUS GENERATOR CONTROL ==========
+                    let generatorRunning = false;
+                    let statusPollInterval = null;
+
+                    // Check initial generator status
+                    checkGeneratorStatus();
+
+                    async function checkGeneratorStatus() {
+                        try {
+                            const response = await fetch('${pageContext.request.contextPath}/api/v1/generator/status');
+                            if (response.ok) {
+                                const data = await response.json();
+                                updateGeneratorUI(data.running, data.eventsGenerated);
+                            }
+                        } catch (error) {
+                            console.log('Could not check generator status:', error);
+                        }
+                    }
+
+                    async function toggleGenerator() {
+                        const button = document.getElementById('generator-toggle');
+                        button.disabled = true;
+                        button.classList.add('loading');
+
+                        try {
+                            const response = await fetch('${pageContext.request.contextPath}/api/v1/generator/toggle', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' }
+                            });
+
+                            if (response.ok) {
+                                const data = await response.json();
+                                updateGeneratorUI(data.running, data.eventsGenerated || 0);
+
+                                // Start or stop polling based on state
+                                if (data.running) {
+                                    startStatusPolling();
+                                } else {
+                                    stopStatusPolling();
+                                }
+                            } else {
+                                console.error('Failed to toggle generator');
+                            }
+                        } catch (error) {
+                            console.error('Error toggling generator:', error);
+                        } finally {
+                            button.disabled = false;
+                            button.classList.remove('loading');
+                        }
+                    }
+
+                    function updateGeneratorUI(running, eventsCount) {
+                        generatorRunning = running;
+
+                        const button = document.getElementById('generator-toggle');
+                        const statusSpan = document.getElementById('generator-status');
+                        const toggleText = button.querySelector('.toggle-text');
+                        const eventsSpan = document.getElementById('events-count');
+
+                        if (running) {
+                            button.classList.add('active');
+                            statusSpan.textContent = 'Active';
+                            statusSpan.className = 'generator-status status-active';
+                            toggleText.textContent = 'Stop';
+                        } else {
+                            button.classList.remove('active');
+                            statusSpan.textContent = 'Inactive';
+                            statusSpan.className = 'generator-status status-inactive';
+                            toggleText.textContent = 'Start';
+                        }
+
+                        eventsSpan.textContent = eventsCount.toLocaleString() + ' events generated';
+                    }
+
+                    function startStatusPolling() {
+                        if (statusPollInterval) return;
+
+                        statusPollInterval = setInterval(async () => {
+                            try {
+                                const response = await fetch('${pageContext.request.contextPath}/api/v1/generator/status');
+                                if (response.ok) {
+                                    const data = await response.json();
+                                    updateGeneratorUI(data.running, data.eventsGenerated);
+
+                                    if (!data.running) {
+                                        stopStatusPolling();
+                                    }
+                                }
+                            } catch (error) {
+                                console.log('Error polling status:', error);
+                            }
+                        }, 2000);
+                    }
+
+                    function stopStatusPolling() {
+                        if (statusPollInterval) {
+                            clearInterval(statusPollInterval);
+                            statusPollInterval = null;
+                        }
+                    }
+
+                    // Initialize polling if already running
+                    checkGeneratorStatus().then(() => {
+                        if (generatorRunning) {
+                            startStatusPolling();
+                        }
+                    });
+
+                    // ========== RATE SLIDER CONTROL ==========
+                    const rateSlider = document.getElementById('rate-slider');
+                    const rateValue = document.getElementById('rate-value');
+
+                    rateSlider.addEventListener('input', function () {
+                        rateValue.textContent = this.value + ' evt/s';
+                    });
+
+                    // Get rate from slider for toggle
+                    function getSelectedRate() {
+                        return document.getElementById('rate-slider').value;
+                    }
+
+                    // Override toggle to include rate
+                    async function toggleGenerator() {
+                        const button = document.getElementById('generator-toggle');
+                        button.disabled = true;
+                        button.classList.add('loading');
+
+                        const rate = getSelectedRate();
+
+                        try {
+                            const response = await fetch('${pageContext.request.contextPath}/api/v1/generator/toggle?rate=' + rate, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' }
+                            });
+
+                            if (response.ok) {
+                                const data = await response.json();
+                                updateGeneratorUI(data.running, data.eventsGenerated || 0);
+
+                                if (data.running) {
+                                    startStatusPolling();
+                                    startLiveUserPolling();
+                                } else {
+                                    stopStatusPolling();
+                                }
+                            } else {
+                                console.error('Failed to toggle generator');
+                            }
+                        } catch (error) {
+                            console.error('Error toggling generator:', error);
+                        } finally {
+                            button.disabled = false;
+                            button.classList.remove('loading');
+                        }
+                    }
+
+                    // ========== EXPORT DATA ==========
+                    function exportData(format) {
+                        const baseUrl = '${pageContext.request.contextPath}/api/v1/export/summary?format=' + format;
+                        window.open(baseUrl, '_blank');
+                    }
+
+                    // ========== LIVE USER COUNT ==========
+                    let liveUserInterval = null;
+
+                    async function fetchLiveUserCount() {
+                        try {
+                            const response = await fetch('${pageContext.request.contextPath}/api/v1/export/live-users');
+                            if (response.ok) {
+                                const data = await response.json();
+                                document.getElementById('live-user-count').textContent = data.activeUsers.toLocaleString();
+                            }
+                        } catch (error) {
+                            console.log('Error fetching live users:', error);
+                        }
+                    }
+
+                    function startLiveUserPolling() {
+                        if (liveUserInterval) return;
+                        fetchLiveUserCount();
+                        liveUserInterval = setInterval(fetchLiveUserCount, 5000);
+                    }
+
+                    function stopLiveUserPolling() {
+                        if (liveUserInterval) {
+                            clearInterval(liveUserInterval);
+                            liveUserInterval = null;
+                        }
+                    }
+
+                    // Start live user polling on page load
+                    startLiveUserPolling();
                 </script>
             </body>
 
