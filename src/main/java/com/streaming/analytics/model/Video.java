@@ -37,6 +37,15 @@ public class Video {
     @BsonProperty("likes")
     private int likes;
 
+    @BsonProperty("rating")
+    private double rating; // TMDB vote average (0-10)
+
+    @BsonProperty("posterUrl")
+    private String posterUrl; // Full URL to movie poster
+
+    @BsonProperty("overview")
+    private String overview; // Movie description/synopsis
+
     // Default constructor required for MongoDB POJO codec
     public Video() {
     }
@@ -115,6 +124,30 @@ public class Video {
 
     public void setLikes(int likes) {
         this.likes = likes;
+    }
+
+    public double getRating() {
+        return rating;
+    }
+
+    public void setRating(double rating) {
+        this.rating = rating;
+    }
+
+    public String getPosterUrl() {
+        return posterUrl;
+    }
+
+    public void setPosterUrl(String posterUrl) {
+        this.posterUrl = posterUrl;
+    }
+
+    public String getOverview() {
+        return overview;
+    }
+
+    public void setOverview(String overview) {
+        this.overview = overview;
     }
 
     @Override

@@ -9,11 +9,16 @@ import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
 import com.streaming.analytics.model.Video;
 import com.streaming.analytics.model.ViewEvent;
+import com.streaming.analytics.tmdb.TmdbClient;
+import com.streaming.analytics.tmdb.TmdbMovie;
 import org.bson.Document;
 
 import java.io.FileWriter;
 import java.io.IOException;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
 import java.util.concurrent.ThreadLocalRandom;
@@ -82,6 +87,11 @@ public class DataGenerator {
     private static final String MONGO_DATABASE = System.getenv("MONGO_DATABASE") != null
             ? System.getenv("MONGO_DATABASE")
             : "streaming_analytics";
+
+    // TMDB API Key (can be overridden via environment variable)
+    private static final String TMDB_API_KEY = System.getenv("TMDB_API_KEY") != null
+            ? System.getenv("TMDB_API_KEY")
+            : "10ddca8c791b2c0538514d2b7999731a";
 
     private final ObjectMapper objectMapper;
     private final Random random;
@@ -419,6 +429,186 @@ public class DataGenerator {
     }
 
     /**
+     * Generates and loads data using TMDB API for real movie data
+     */
+    public void generateWithTmdb(int eventCount, int moviesPerCategory) {
+        System.out.println("🔗 Connecting to MongoDB: " + MONGO_URI);
+        System.out.println("📊 Database: " + MONGO_DATABASE);
+        System.out.println("🎬 TMDB API Key: " + TMDB_API_KEY.substring(0, 8) + "...");
+
+        // Test TMDB connection
+        TmdbClient tmdbClient = new TmdbClient(TMDB_API_KEY);
+        if (!tmdbClient.testConnection()) {
+            System.err.println("❌ Failed to connect to TMDB API. Falling back to mock data.");
+            generateAndLoadToMongo(eventCount);
+            return;
+        }
+        System.out.println("✅ TMDB API connection successful!\n");
+
+        try (MongoClient mongoClient = MongoClients.create(MONGO_URI)) {
+            MongoDatabase database = mongoClient.getDatabase(MONGO_DATABASE);
+
+            // Fetch movies from TMDB by category
+            Map<String, List<TmdbMovie>> moviesByCategory = tmdbClient.fetchMoviesByAllCategories(moviesPerCategory);
+
+            // Convert TMDB movies to Video objects and load to MongoDB
+            MongoCollection<Document> videosCollection = database.getCollection("videos");
+            System.out.println("\n📹 Loading movies to MongoDB...");
+
+            // Clear existing videos
+            videosCollection.drop();
+
+            List<Document> videoDocs = new ArrayList<>();
+            int videoId = 1;
+            int totalMovies = 0;
+
+            for (Map.Entry<String, List<TmdbMovie>> entry : moviesByCategory.entrySet()) {
+                String category = entry.getKey();
+                List<TmdbMovie> movies = entry.getValue();
+
+                for (TmdbMovie tmdbMovie : movies) {
+                    Video video = tmdbMovieToVideo(tmdbMovie, videoId, category);
+                    videoDocs.add(videoToDocumentWithTmdb(video));
+                    videoId++;
+                    totalMovies++;
+                }
+            }
+
+            if (!videoDocs.isEmpty()) {
+                videosCollection.insertMany(videoDocs);
+            }
+            System.out.println("✅ " + totalMovies + " real movies loaded from TMDB");
+
+            // Update NUM_VIDEOS for event generation
+            int numVideos = totalMovies;
+
+            // Generate events for the TMDB movies
+            MongoCollection<Document> eventsCollection = database.getCollection("events");
+            System.out.println("\n🎬 Generating " + eventCount + " events for TMDB movies...");
+
+            eventsCollection.drop();
+
+            int batchSize = 5000;
+            List<Document> eventBatch = new ArrayList<>();
+
+            for (int i = 0; i < eventCount; i++) {
+                ViewEvent event = generateEventForVideoCount(numVideos);
+                eventBatch.add(eventToDocument(event));
+
+                if (eventBatch.size() >= batchSize) {
+                    eventsCollection.insertMany(eventBatch);
+                    System.out.println("  ✓ " + (i + 1) + " events loaded");
+                    eventBatch.clear();
+                }
+            }
+
+            if (!eventBatch.isEmpty()) {
+                eventsCollection.insertMany(eventBatch);
+            }
+
+            System.out.println("✅ " + eventCount + " events loaded into MongoDB");
+
+            // Compute video stats
+            aggregateVideoStats(database);
+
+            System.out.println("\n🎉 TMDB Data generation complete!");
+            System.out.println("   Events: " + eventsCollection.countDocuments());
+            System.out.println("   Videos: " + videosCollection.countDocuments());
+            System.out.println("   Stats:  " + database.getCollection("video_stats").countDocuments());
+
+            // Print sample movies
+            System.out.println("\n📽️ Sample movies loaded:");
+            videosCollection.find().limit(5).forEach(doc -> System.out.println("   - " + doc.getString("title") + " ("
+                    + doc.getString("category") + ") ⭐ " + doc.getDouble("rating")));
+
+        } catch (Exception e) {
+            System.err.println("❌ Error: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+
+    /**
+     * Converts a TMDB movie to a Video entity
+     */
+    private Video tmdbMovieToVideo(TmdbMovie tmdbMovie, int videoId, String category) {
+        Video video = new Video();
+        video.setVideoId("video_" + videoId);
+        video.setTitle(tmdbMovie.getTitle());
+        video.setCategory(category);
+        video.setRating(tmdbMovie.getVoteAverage());
+        video.setPosterUrl(tmdbMovie.getFullPosterUrl());
+        video.setOverview(tmdbMovie.getOverview());
+
+        // Parse release date to Instant
+        try {
+            if (tmdbMovie.getReleaseDate() != null && !tmdbMovie.getReleaseDate().isEmpty()) {
+                LocalDate releaseDate = LocalDate.parse(tmdbMovie.getReleaseDate(), DateTimeFormatter.ISO_LOCAL_DATE);
+                video.setUploadDate(releaseDate.atStartOfDay().toInstant(ZoneOffset.UTC));
+            } else {
+                video.setUploadDate(Instant.now().minus(ThreadLocalRandom.current().nextLong(0, 365), ChronoUnit.DAYS));
+            }
+        } catch (Exception e) {
+            video.setUploadDate(Instant.now().minus(ThreadLocalRandom.current().nextLong(0, 365), ChronoUnit.DAYS));
+        }
+
+        // Estimate duration (typical movie is 90-150 minutes)
+        video.setDuration(ThreadLocalRandom.current().nextInt(5400, 10800));
+
+        // Initial views and likes based on popularity
+        video.setViews((int) (tmdbMovie.getPopularity() * 1000));
+        video.setLikes((int) (tmdbMovie.getPopularity() * 100));
+
+        return video;
+    }
+
+    /**
+     * Converts a Video to MongoDB Document (with TMDB fields)
+     */
+    private Document videoToDocumentWithTmdb(Video video) {
+        Document doc = new Document();
+        doc.append("videoId", video.getVideoId());
+        doc.append("title", video.getTitle());
+        doc.append("category", video.getCategory());
+        doc.append("duration", video.getDuration());
+        doc.append("uploadDate", Date.from(video.getUploadDate()));
+        doc.append("views", video.getViews());
+        doc.append("likes", video.getLikes());
+        doc.append("rating", video.getRating());
+        doc.append("posterUrl", video.getPosterUrl());
+        doc.append("overview", video.getOverview());
+        return doc;
+    }
+
+    /**
+     * Generates an event for a specific video count (for TMDB mode)
+     */
+    private ViewEvent generateEventForVideoCount(int videoCount) {
+        ViewEvent event = new ViewEvent();
+
+        event.setEventId("evt_" + UUID.randomUUID().toString().substring(0, 8));
+        event.setUserId("user_" + ThreadLocalRandom.current().nextInt(1, NUM_USERS + 1));
+        event.setVideoId("video_" + ThreadLocalRandom.current().nextInt(1, videoCount + 1));
+
+        // Timestamp within last 24 hours
+        Instant now = Instant.now();
+        long randomMinutes = ThreadLocalRandom.current().nextLong(0, 24 * 60);
+        event.setTimestamp(now.minus(randomMinutes, ChronoUnit.MINUTES));
+
+        event.setAction(ACTIONS[random.nextInt(ACTIONS.length)]);
+
+        if ("WATCH".equals(event.getAction())) {
+            event.setDuration(ThreadLocalRandom.current().nextInt(30, 3600));
+        } else {
+            event.setDuration(ThreadLocalRandom.current().nextInt(0, 300));
+        }
+
+        event.setQuality(QUALITIES[random.nextInt(QUALITIES.length)]);
+        event.setDeviceType(DEVICE_TYPES[random.nextInt(DEVICE_TYPES.length)]);
+
+        return event;
+    }
+
+    /**
      * Main method for standalone execution
      */
     public static void main(String[] args) {
@@ -445,6 +635,14 @@ public class DataGenerator {
                     int duration = args.length > 2 ? Integer.parseInt(args[2]) : 60;
                     System.out.println("⚡ MODE: Continuous Real-time Streaming\n");
                     generator.streamToMongo(rate, duration);
+                    break;
+
+                case "tmdb":
+                    // TMDB API mode - fetch real movies
+                    int tmdbEventCount = args.length > 1 ? Integer.parseInt(args[1]) : 100000;
+                    int moviesPerCategory = args.length > 2 ? Integer.parseInt(args[2]) : 10;
+                    System.out.println("🎬 MODE: TMDB API Integration\n");
+                    generator.generateWithTmdb(tmdbEventCount, moviesPerCategory);
                     break;
 
                 case "batch":

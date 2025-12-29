@@ -59,6 +59,21 @@
                                 <span class="toggle-text">Start</span>
                             </button>
 
+                            <!-- TMDB Continuous Generation Control -->
+                            <div class="tmdb-control">
+                                <div class="tmdb-info">
+                                    <span class="tmdb-label">🎬 TMDB Mode</span>
+                                    <span id="tmdb-status" class="generator-status status-inactive">Inactive</span>
+                                </div>
+                                <div class="tmdb-stats">
+                                    <span id="tmdb-events-count">0 events</span>
+                                    <span id="tmdb-movies-count">0 movies</span>
+                                </div>
+                                <button id="tmdb-toggle" class="btn-tmdb" onclick="toggleTmdb()">
+                                    <span>🎬</span> <span class="tmdb-toggle-text">Start TMDB</span>
+                                </button>
+                            </div>
+
                             <!-- Export Buttons -->
                             <div class="export-buttons">
                                 <button class="btn-export" onclick="exportData('json')" title="Export as JSON">
@@ -328,23 +343,38 @@
 
                     // ========== CHART.JS CHARTS ==========
 
-                    // Color palette
+                    // Color palette - Blue to Purple Gradients
                     const colors = {
-                        primary: 'rgba(99, 102, 241, 0.8)',
-                        secondary: 'rgba(168, 85, 247, 0.8)',
-                        success: 'rgba(34, 197, 94, 0.8)',
-                        warning: 'rgba(251, 191, 36, 0.8)',
-                        danger: 'rgba(239, 68, 68, 0.8)',
-                        info: 'rgba(59, 130, 246, 0.8)',
+                        primary: 'rgba(59, 130, 246, 0.8)',      // Blue
+                        secondary: 'rgba(139, 92, 246, 0.8)',    // Purple
+                        // Function to create gradient for canvas charts
+                        createGradient: function (ctx, startColor, endColor) {
+                            const gradient = ctx.createLinearGradient(0, 0, 0, 400);
+                            gradient.addColorStop(0, startColor);
+                            gradient.addColorStop(1, endColor);
+                            return gradient;
+                        },
+                        // Blue to purple gradient palette
                         palette: [
-                            'rgba(99, 102, 241, 0.8)',
-                            'rgba(168, 85, 247, 0.8)',
-                            'rgba(236, 72, 153, 0.8)',
-                            'rgba(239, 68, 68, 0.8)',
-                            'rgba(251, 191, 36, 0.8)',
-                            'rgba(34, 197, 94, 0.8)',
-                            'rgba(59, 130, 246, 0.8)',
-                            'rgba(20, 184, 166, 0.8)'
+                            'rgba(59, 130, 246, 0.8)',   // Blue
+                            'rgba(79, 120, 246, 0.8)',   // Blue-Indigo
+                            'rgba(99, 110, 246, 0.8)',   // Indigo
+                            'rgba(119, 100, 246, 0.8)', // Indigo-Violet
+                            'rgba(139, 92, 246, 0.8)',  // Violet
+                            'rgba(159, 82, 246, 0.8)',  // Violet-Purple
+                            'rgba(168, 85, 247, 0.8)',  // Purple
+                            'rgba(192, 75, 247, 0.8)'   // Purple-Magenta
+                        ],
+                        // Solid versions for borders
+                        paletteSolid: [
+                            'rgba(59, 130, 246, 1)',
+                            'rgba(79, 120, 246, 1)',
+                            'rgba(99, 110, 246, 1)',
+                            'rgba(119, 100, 246, 1)',
+                            'rgba(139, 92, 246, 1)',
+                            'rgba(159, 82, 246, 1)',
+                            'rgba(168, 85, 247, 1)',
+                            'rgba(192, 75, 247, 1)'
                         ]
                     };
 
@@ -482,13 +512,9 @@
                                 labels: qualityLabels,
                                 datasets: [{
                                     data: qualityData,
-                                    backgroundColor: [
-                                        'rgba(239, 68, 68, 0.7)',   // 360p - Red (low)
-                                        'rgba(251, 191, 36, 0.7)', // 480p - Yellow
-                                        'rgba(34, 197, 94, 0.7)',  // 720p - Green
-                                        'rgba(59, 130, 246, 0.7)', // 1080p - Blue
-                                        'rgba(168, 85, 247, 0.7)'  // 4K - Purple (best)
-                                    ]
+                                    backgroundColor: colors.palette.slice(0, 5),
+                                    borderColor: colors.paletteSolid.slice(0, 5),
+                                    borderWidth: 2
                                 }]
                             },
                             options: {
@@ -520,13 +546,9 @@
                                 datasets: [{
                                     label: 'Event Count',
                                     data: actionData,
-                                    backgroundColor: [
-                                        'rgba(34, 197, 94, 0.8)',   // WATCH - Green
-                                        'rgba(251, 191, 36, 0.8)', // PAUSE - Yellow
-                                        'rgba(239, 68, 68, 0.8)',  // STOP - Red
-                                        'rgba(59, 130, 246, 0.8)', // RESUME - Blue
-                                        'rgba(168, 85, 247, 0.8)'  // SEEK - Purple
-                                    ],
+                                    backgroundColor: colors.palette.slice(0, 5),
+                                    borderColor: colors.paletteSolid.slice(0, 5),
+                                    borderWidth: 1,
                                     borderRadius: 6
                                 }]
                             },
@@ -568,8 +590,8 @@
                                 datasets: [{
                                     label: 'Avg Watch Duration (seconds)',
                                     data: engagementData,
-                                    backgroundColor: 'rgba(16, 185, 129, 0.8)',
-                                    borderColor: 'rgba(16, 185, 129, 1)',
+                                    backgroundColor: colors.palette,
+                                    borderColor: colors.paletteSolid,
                                     borderWidth: 1,
                                     borderRadius: 6
                                 }]
@@ -893,6 +915,119 @@
                         const baseUrl = '${pageContext.request.contextPath}/api/v1/export/summary?format=' + format;
                         window.open(baseUrl, '_blank');
                     }
+
+                    // ========== TMDB CONTINUOUS GENERATOR CONTROL ==========
+                    let tmdbRunning = false;
+                    let tmdbStatusPollInterval = null;
+
+                    // Check initial TMDB status
+                    checkTmdbStatus();
+
+                    async function checkTmdbStatus() {
+                        try {
+                            const response = await fetch('${pageContext.request.contextPath}/api/v1/generator/tmdb/status');
+                            if (response.ok) {
+                                const data = await response.json();
+                                updateTmdbUI(data.running, data.eventsGenerated, data.moviesLoaded);
+                            }
+                        } catch (error) {
+                            console.log('Could not check TMDB status:', error);
+                        }
+                    }
+
+                    async function toggleTmdb() {
+                        const button = document.getElementById('tmdb-toggle');
+                        button.disabled = true;
+                        button.classList.add('loading');
+
+                        const rate = getSelectedRate();
+
+                        try {
+                            const response = await fetch('${pageContext.request.contextPath}/api/v1/generator/tmdb/toggle?rate=' + rate, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' }
+                            });
+
+                            if (response.ok) {
+                                const data = await response.json();
+                                updateTmdbUI(data.running, data.eventsGenerated || 0, data.moviesLoaded || 0);
+
+                                if (data.running) {
+                                    startTmdbStatusPolling();
+                                } else {
+                                    stopTmdbStatusPolling();
+                                }
+                            } else {
+                                const error = await response.json();
+                                alert('TMDB Error: ' + (error.error || 'Unknown error'));
+                            }
+                        } catch (error) {
+                            console.error('Error toggling TMDB:', error);
+                            alert('Failed to connect to TMDB API');
+                        } finally {
+                            button.disabled = false;
+                            button.classList.remove('loading');
+                        }
+                    }
+
+                    function updateTmdbUI(running, eventsCount, moviesCount) {
+                        tmdbRunning = running;
+
+                        const button = document.getElementById('tmdb-toggle');
+                        const statusSpan = document.getElementById('tmdb-status');
+                        const toggleText = button.querySelector('.tmdb-toggle-text');
+                        const eventsSpan = document.getElementById('tmdb-events-count');
+                        const moviesSpan = document.getElementById('tmdb-movies-count');
+
+                        if (running) {
+                            button.classList.add('active');
+                            statusSpan.textContent = 'Active';
+                            statusSpan.className = 'generator-status status-active';
+                            toggleText.textContent = 'Stop TMDB';
+                        } else {
+                            button.classList.remove('active');
+                            statusSpan.textContent = 'Inactive';
+                            statusSpan.className = 'generator-status status-inactive';
+                            toggleText.textContent = 'Start TMDB';
+                        }
+
+                        eventsSpan.textContent = (eventsCount || 0).toLocaleString() + ' events';
+                        moviesSpan.textContent = (moviesCount || 0) + ' movies';
+                    }
+
+                    function startTmdbStatusPolling() {
+                        if (tmdbStatusPollInterval) return;
+
+                        tmdbStatusPollInterval = setInterval(async () => {
+                            try {
+                                const response = await fetch('${pageContext.request.contextPath}/api/v1/generator/tmdb/status');
+                                if (response.ok) {
+                                    const data = await response.json();
+                                    updateTmdbUI(data.running, data.eventsGenerated, data.moviesLoaded);
+
+                                    if (!data.running) {
+                                        stopTmdbStatusPolling();
+                                    }
+                                }
+                            } catch (error) {
+                                console.log('Error polling TMDB status:', error);
+                            }
+                        }, 2000);
+                    }
+
+                    function stopTmdbStatusPolling() {
+                        if (tmdbStatusPollInterval) {
+                            clearInterval(tmdbStatusPollInterval);
+                            tmdbStatusPollInterval = null;
+                        }
+                    }
+
+                    // Initialize TMDB polling if already running
+                    checkTmdbStatus().then(() => {
+                        if (tmdbRunning) {
+                            startTmdbStatusPolling();
+                        }
+                    });
 
                     // ========== LIVE USER COUNT ==========
                     let liveUserInterval = null;

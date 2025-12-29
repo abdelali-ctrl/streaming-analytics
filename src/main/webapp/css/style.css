@@ -16,10 +16,10 @@
     /* Solid Colors */
     --primary-color: #667eea;
     --primary-light: #818cf8;
-    --secondary-color: #38ef7d;
-    --accent-color: #f5576c;
-    --accent-orange: #ff9a3c;
-    --accent-cyan: #00d9ff;
+    --secondary-color: #3866ef;
+    --accent-color: #04b8dd;
+    --accent-orange: #1bc5a1;
+    --accent-cyan: #00ff8b;
 
     /* Background & Surface */
     --background: #0a0a1a;
@@ -998,6 +998,81 @@ body::before {
 
 .btn-export span {
     font-size: 1rem;
+}
+
+/* ============================================
+   TMDB Button
+   ============================================ */
+
+.tmdb-control {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 0.5rem 1rem;
+    background: rgba(245, 158, 11, 0.1);
+    border: 1px solid rgba(245, 158, 11, 0.2);
+    border-radius: 12px;
+}
+
+.tmdb-info {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.tmdb-label {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: #f59e0b;
+}
+
+.tmdb-stats {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    font-family: 'JetBrains Mono', 'Monaco', monospace;
+}
+
+.btn-tmdb {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.6rem 1.1rem;
+    font-size: 0.85rem;
+    font-weight: 600;
+    font-family: 'Inter', sans-serif;
+    color: #ffffff;
+    background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+    border: none;
+    border-radius: 25px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    box-shadow: 0 4px 15px rgba(245, 158, 11, 0.3);
+}
+
+.btn-tmdb:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(245, 158, 11, 0.5);
+}
+
+.btn-tmdb:active {
+    transform: translateY(0);
+}
+
+.btn-tmdb.active {
+    background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+    box-shadow: 0 4px 15px rgba(16, 185, 129, 0.4);
+}
+
+.btn-tmdb.loading {
+    opacity: 0.7;
+    cursor: not-allowed;
+}
+
+.btn-tmdb span {
+    font-size: 1.1rem;
 }
 
 /* ============================================
